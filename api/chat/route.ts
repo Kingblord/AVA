@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const openrouter = new OpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY!,
   defaultHeaders: {
-    "HTTP-Referer": "https://nukuai.vercel.app/",
+    "HTTP-Referer": "https://nukuai.vercel.app",
     "X-OpenRouter-Title": "Nuku-AI Platform",
   },
 });
