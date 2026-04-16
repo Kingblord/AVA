@@ -187,4 +187,85 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+}      return NextResponse.json(
+        { error: "Invalid model. Available: Duru, Duru-mini, Agwu, AVA" },
+        { status: 400 }
+      );
+    }
+
+    const config = MODEL_CONFIG[model as keyof typeof MODEL_CONFIG];
+
+    const fullMessages = [
+      { role: "system", content: config.systemPrompt },
+      ...messages,
+    ];
+
+    const stream = await openrouter.chat.send({
+      model: config.model,
+      messages: fullMessages,
+      temperature,
+      max_tokens: max_tokens || undefined,
+      stream: true,
+    });
+
+    // ====================== AVA SPECIAL HANDLING ======================
+   if (model === "AVA") {
+  let fullText = "";
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content;
+    if (content) fullText += content;
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(fullText);
+  } catch {}
+
+  if (parsed?.action) {
+    const result = await handleAvaAction(parsed);
+
+    return NextResponse.json({
+      type: "action_result",
+      action: parsed.action,
+      result
+    });
+  }
+
+  return NextResponse.json({
+    type: "message",
+    content: fullText
+  });
+}
+
+    // ====================== NORMAL STREAM (OTHER MODELS) ======================
+    const encoder = new TextEncoder();
+
+    const streamResponse = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content;
+          if (content) {
+            controller.enqueue(encoder.encode(content));
+          }
+        }
+        controller.close();
+      },
+    });
+
+    return new Response(streamResponse, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+
+  } catch (error: any) {
+    console.error("Chat Error:", error);
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    );
+  }
 }
