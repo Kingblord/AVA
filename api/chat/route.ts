@@ -2,6 +2,7 @@
 import { OpenRouter } from "@openrouter/sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { kv } from "@vercel/kv";
+import { handleAvaAction } from "@/lib/ava-actions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -127,31 +128,34 @@ export async function POST(req: NextRequest) {
     });
 
     // ====================== AVA SPECIAL HANDLING ======================
-    if (model === "AVA") {
-      let fullText = "";
+   if (model === "AVA") {
+  let fullText = "";
 
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) fullText += content;
-      }
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content;
+    if (content) fullText += content;
+  }
 
-      let parsed = null;
-      try {
-        parsed = JSON.parse(fullText);
-      } catch {}
+  let parsed = null;
+  try {
+    parsed = JSON.parse(fullText);
+  } catch {}
 
-      if (parsed?.action) {
-        return NextResponse.json({
-          type: "action",
-          data: parsed
-        });
-      }
+  if (parsed?.action) {
+    const result = await handleAvaAction(parsed);
 
-      return NextResponse.json({
-        type: "message",
-        content: fullText
-      });
-    }
+    return NextResponse.json({
+      type: "action_result",
+      action: parsed.action,
+      result
+    });
+  }
+
+  return NextResponse.json({
+    type: "message",
+    content: fullText
+  });
+}
 
     // ====================== NORMAL STREAM (OTHER MODELS) ======================
     const encoder = new TextEncoder();
