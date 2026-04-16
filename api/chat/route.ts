@@ -18,10 +18,10 @@ const openrouter = new OpenRouter({
 const MODEL_CONFIG = {
   Duru: {
     name: "Duru",
-    description: "Deep thinker — breaks down complex problems with step-by-step reasoning",
+    description: "Deep thinker — breaks down complex problems carefully",
     systemPrompt: `You are Duru, Nuku-AI's master deep thinker.
-You think extremely carefully. Always reason step-by-step, re-evaluate your logic 2-3 times, explore edge cases, and only then give a final clear answer.
-Show your full thinking process.`,
+Think carefully and explain your reasoning step-by-step in a clear and structured way.
+Avoid exposing internal hidden thoughts. Provide only the final structured explanation.`,
     model: "openrouter/free",
   },
 
@@ -29,68 +29,76 @@ Show your full thinking process.`,
     name: "Duru mini",
     description: "Fast, smart everyday assistant",
     systemPrompt: `You are Duru-mini, Nuku-AI's friendly and efficient everyday assistant.
-You are fast, practical, and helpful for normal daily tasks, questions, and quick assistance.`,
+You are fast, practical, and helpful for normal daily tasks.`,
     model: "openrouter/free",
   },
 
   Agwu: {
     name: "Agwu",
-    description: "Best in coding — clean, complete, production-ready code",
+    description: "Best in coding — clean, production-ready code",
     systemPrompt: `You are Agwu, Nuku-AI's world-class coding specialist.
-You ONLY output clean, well-commented, complete, production-ready code.
-First give a very short plan (1-2 lines), then output ONLY the full code. Never add extra explanations outside the code block unless the user specifically asks.`,
+First give a very short plan (1-2 lines), then output ONLY the full clean production-ready code.`,
     model: "openrouter/free",
   },
 
   AVA: {
     name: "AVA",
-    description: "AI Virtual Agent — task automation, clerk, cashier, negotiator, deal closer, payment automation",
-    systemPrompt: `You are AVA, Nuku-AI's AI Virtual Agent.
-You are a highly professional, proactive, and obedient automation agent.
-You can act as a clerk, cashier, negotiator, customer support, teller, or any business role.
-You excel at task automation, chatting with clients, closing deals, and handling payments.
-When users are offline, you can continue conversations, confirm payments, and use payment SDKs (Paystack, Flutterwave, Stripe, etc.).
-Always stay in character, be polite, professional, and action-oriented. Ask clarifying questions if needed and complete tasks efficiently.`,
+    description: "AI Virtual Agent — automation, negotiation, payments",
+    systemPrompt: `You are AVA, an AI business agent.
+
+You do NOT just chat. You decide actions.
+
+At every step:
+1. Understand the user's intent
+2. If an action is required, respond ONLY in JSON
+3. If no action is required, respond normally
+
+Available actions:
+- create_payment_link
+- verify_payment
+- create_order
+- get_customer_history
+
+STRICT RULES:
+- NEVER mix text and JSON
+- If action is needed, output ONLY JSON
+- JSON format:
+
+{
+  "action": "tool_name",
+  "parameters": { ... }
+}
+
+If no action is needed:
+Respond normally as a professional assistant.`,
     model: "openrouter/free",
   },
 } as const;
 
-// ====================== AUTH MIDDLEWARE ======================
-async function validateApiKey(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return { valid: false, error: "Missing or invalid Authorization header. Use Bearer <api-key>" };
+// ====================== OPTIONAL GLOBAL RATE LIMIT ======================
+async function checkRateLimit() {
+  const rateKey = "global:rate";
+  const count = (await kv.get<number>(rateKey)) || 0;
+
+  if (count > 100) {
+    return false;
   }
 
-  const apiKey = authHeader.split(" ")[1];
-  const keyData = await kv.get(`key:${apiKey}`);
+  await kv.incr(rateKey);
+  await kv.expire(rateKey, 60);
 
-  if (!keyData) {
-    return { valid: false, error: "Invalid or expired API key" };
-  }
-
-  // Basic rate limit (60 requests per minute per key)
-  const now = Date.now();
-  const rateKey = `rate:${apiKey}`;
-  const requests = (await kv.get(rateKey)) || [];
-  const recent = requests.filter((ts: number) => now - ts < 60 * 1000);
-
-  if (recent.length >= 60) {
-    return { valid: false, error: "Rate limit exceeded (60 req/min). Try again later." };
-  }
-
-  // Update rate
-  recent.push(now);
-  await kv.set(rateKey, recent, { ex: 70 }); // expire a bit after window
-
-  return { valid: true, keyData };
+  return true;
 }
 
 // ====================== MAIN CHAT ENDPOINT ======================
 export async function POST(req: NextRequest) {
-  const auth = await validateApiKey(req);
-  if (!auth.valid) {
-    return NextResponse.json({ error: auth.error }, { status: 401 });
+  // Optional protection (prevents abuse)
+  const allowed = await checkRateLimit();
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Server busy. Try again shortly." },
+      { status: 429 }
+    );
   }
 
   try {
@@ -118,6 +126,34 @@ export async function POST(req: NextRequest) {
       stream: true,
     });
 
+    // ====================== AVA SPECIAL HANDLING ======================
+    if (model === "AVA") {
+      let fullText = "";
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) fullText += content;
+      }
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(fullText);
+      } catch {}
+
+      if (parsed?.action) {
+        return NextResponse.json({
+          type: "action",
+          data: parsed
+        });
+      }
+
+      return NextResponse.json({
+        type: "message",
+        content: fullText
+      });
+    }
+
+    // ====================== NORMAL STREAM (OTHER MODELS) ======================
     const encoder = new TextEncoder();
 
     const streamResponse = new ReadableStream({
@@ -126,11 +162,6 @@ export async function POST(req: NextRequest) {
           const content = chunk.choices[0]?.delta?.content;
           if (content) {
             controller.enqueue(encoder.encode(content));
-          }
-
-          if (chunk.usage) {
-            // Optional: log usage to KV for future analytics
-            console.log(`[\( {model}][ \){auth.keyData?.name || 'user'}] Usage:`, chunk.usage);
           }
         }
         controller.close();
@@ -144,8 +175,12 @@ export async function POST(req: NextRequest) {
         "Connection": "keep-alive",
       },
     });
+
   } catch (error: any) {
     console.error("Chat Error:", error);
-    return NextResponse.json({ error: error.message || "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Internal server error" },
+      { status: 500 }
+    );
   }
 }
