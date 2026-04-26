@@ -1,7 +1,7 @@
 import { getAIResponse } from "../../lib/openrouter.js";
 
 export default async function handler(req, res) {
-  // Allow quick test in browser
+  // Health check
   if (req.method === "GET") {
     return res.status(200).send("AVA WhatsApp webhook live");
   }
@@ -11,12 +11,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const body = req.body || {};
+    // -------------------------
+    // SAFE BODY PARSING
+    // -------------------------
+    const body =
+      typeof req.body === "string"
+        ? parseForm(req.body)
+        : req.body || {};
 
     console.log("FULL BODY:", body);
 
-    const userMessage = body.Body || "";
-    const from = body.From || "";
+    const userMessage = body.Body || body.body || "";
+    const from = body.From || body.from || "unknown";
 
     console.log("Message:", userMessage);
     console.log("From:", from);
@@ -24,7 +30,11 @@ export default async function handler(req, res) {
     // -------------------------
     // AI RESPONSE
     // -------------------------
-    const aiReply = await getAIResponse(userMessage);
+    let aiReply = "Sorry, I didn't get that.";
+
+    if (userMessage) {
+      aiReply = await getAIResponse(userMessage);
+    }
 
     console.log("AI Reply:", aiReply);
 
@@ -35,7 +45,7 @@ export default async function handler(req, res) {
 
     return res.status(200).send(`
       <Response>
-        <Message>${aiReply}</Message>
+        <Message>${escapeXML(aiReply)}</Message>
       </Response>
     `);
 
@@ -50,4 +60,26 @@ export default async function handler(req, res) {
       </Response>
     `);
   }
+}
+
+// -------------------------
+// HELPERS
+// -------------------------
+
+function parseForm(body) {
+  const params = new URLSearchParams(body);
+  const obj = {};
+  for (const [key, value] of params.entries()) {
+    obj[key] = value;
+  }
+  return obj;
+}
+
+function escapeXML(str = "") {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
