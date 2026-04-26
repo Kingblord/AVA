@@ -1,0 +1,8 @@
+{
+  "name": "ava-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@openrouter/sdk": "^1.0.0"
+  }
+}
