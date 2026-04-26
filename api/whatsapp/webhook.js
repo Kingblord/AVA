@@ -1,32 +1,34 @@
-import express from "express";
+export default async function handler(req, res) {
+  if (req.method === "GET") {
+    return res.status(200).send("AVA webhook alive");
+  }
 
-const app = express();
+  if (req.method !== "POST") {
+    return res.status(405).send("Method not allowed");
+  }
 
-// VERY IMPORTANT
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+  try {
+    const body = req.body || {};
 
-app.post("/api/whatsapp/webhook", (req, res) => {
-  console.log("FULL BODY:", req.body);
+    console.log("FULL BODY:", body);
 
-  const msg = req.body.Body;
-  const from = req.body.From;
+    const msg = body.Body || body.body || "";
+    const from = body.From || body.from || "";
 
-  console.log("Message:", msg);
-  console.log("From:", from);
+    console.log("Message:", msg);
+    console.log("From:", from);
 
-  const reply = `AVA received: ${msg}`;
+    const reply = `AVA received: ${msg}`;
 
-  res.set("Content-Type", "text/xml");
-  res.send(`
-    <Response>
-      <Message>${reply}</Message>
-    </Response>
-  `);
-});
+    res.setHeader("Content-Type", "text/xml");
 
-app.get("/", (req, res) => {
-  res.send("Server is alive");
-});
-
-app.listen(3000, () => console.log("Running on port 3000"));
+    return res.status(200).send(`
+      <Response>
+        <Message>${reply}</Message>
+      </Response>
+    `);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).send("Error");
+  }
+}
