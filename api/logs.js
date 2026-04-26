@@ -4,7 +4,7 @@ export default function handler(req, res) {
   // -------------------------
   // CORS HEADERS
   // -------------------------
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1:3000");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
