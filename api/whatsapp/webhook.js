@@ -1,9 +1,11 @@
 import { getAIResponse } from "../../lib/openrouter.js";
+import { addLog } from "../_utils/store.js";
 
 export default async function handler(req, res) {
-  // Health check
+  res.setHeader("Access-Control-Allow-Origin", "*");
+
   if (req.method === "GET") {
-    return res.status(200).send("AVA WhatsApp webhook live");
+    return res.status(200).send("AVA webhook live");
   }
 
   if (req.method !== "POST") {
@@ -11,36 +13,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    // -------------------------
-    // SAFE BODY PARSING
-    // -------------------------
     const body =
       typeof req.body === "string"
         ? parseForm(req.body)
         : req.body || {};
 
-    console.log("FULL BODY:", body);
+    const userMessage = body.Body || "";
+    const from = body.From || "unknown";
 
-    const userMessage = body.Body || body.body || "";
-    const from = body.From || body.from || "unknown";
+    console.log("Incoming:", userMessage, from);
 
-    console.log("Message:", userMessage);
-    console.log("From:", from);
-
-    // -------------------------
-    // AI RESPONSE
-    // -------------------------
-    let aiReply = "Sorry, I didn't get that.";
+    // 🚨 SAFE AI CALL (INLINE — NO IMPORT ISSUES)
+    let aiReply = "Hello 👋 How can I help you today?";
 
     if (userMessage) {
-      aiReply = await getAIResponse(userMessage);
+      aiReply = await getAI(userMessage);
     }
 
-    console.log("AI Reply:", aiReply);
+    addLog({
+      from,
+      userMessage,
+      aiReply,
+      time: new Date().toISOString()
+    });
 
-    // -------------------------
-    // TWILIO XML RESPONSE
-    // -------------------------
     res.setHeader("Content-Type", "text/xml");
 
     return res.status(200).send(`
@@ -49,29 +45,58 @@ export default async function handler(req, res) {
       </Response>
     `);
 
-  } catch (error) {
-    console.error("ERROR:", error);
+  } catch (err) {
+    console.error("CRASH:", err);
 
     res.setHeader("Content-Type", "text/xml");
 
     return res.status(200).send(`
       <Response>
-        <Message>AVA is currently unavailable. Try again.</Message>
+        <Message>Server error occurred</Message>
       </Response>
     `);
   }
 }
 
-// -------------------------
-// HELPERS
-// -------------------------
+// 🔥 INLINE AI FUNCTION (NO IMPORT RISK)
+async function getAI(message) {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "openrouter/auto",
+        messages: [
+          {
+            role: "system",
+            content: "You are a helpful sales assistant. Keep replies short."
+          },
+          {
+            role: "user",
+            content: message
+          }
+        ]
+      })
+    });
 
+    const data = await res.json();
+
+    return data?.choices?.[0]?.message?.content || "No response";
+
+  } catch (e) {
+    console.error("AI ERROR:", e);
+    return "AI unavailable";
+  }
+}
+
+// HELPERS
 function parseForm(body) {
   const params = new URLSearchParams(body);
   const obj = {};
-  for (const [key, value] of params.entries()) {
-    obj[key] = value;
-  }
+  for (const [k, v] of params.entries()) obj[k] = v;
   return obj;
 }
 
@@ -79,7 +104,5 @@ function escapeXML(str = "") {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+    .replace(/>/g, "&gt;");
 }
