@@ -1,10 +1,9 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { getAIResponse } from "../../lib/openrouter";
-import { addLog } from "../_utils/store";
+import { getAIResponse } from "../../lib/openrouter.js";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
+  // health check
   if (req.method === "GET") {
     return res.status(200).send("AVA webhook live");
   }
@@ -14,13 +13,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const body: any =
+    const body =
       typeof req.body === "string"
         ? parseForm(req.body)
         : req.body || {};
 
-    const userMessage: string = body.Body || "";
-    const from: string = body.From || "unknown";
+    const userMessage = body.Body || "";
+    const from = body.From || "unknown";
 
     console.log("Incoming:", userMessage, from);
 
@@ -29,13 +28,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (userMessage) {
       aiReply = await getAIResponse(userMessage);
     }
-
-    addLog({
-      from,
-      userMessage,
-      aiReply,
-      time: new Date().toISOString()
-    });
 
     res.setHeader("Content-Type", "text/xml");
 
@@ -58,20 +50,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// -------------------- HELPERS --------------------
+/* ---------------- HELPERS ---------------- */
 
-function parseForm(body: string) {
+function parseForm(body) {
   const params = new URLSearchParams(body);
-  const obj: Record<string, string> = {};
-
+  const obj = {};
   for (const [k, v] of params.entries()) {
     obj[k] = v;
   }
-
   return obj;
 }
 
-function escapeXML(str: string = "") {
+function escapeXML(str = "") {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
